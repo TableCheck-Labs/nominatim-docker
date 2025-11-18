@@ -20,6 +20,19 @@ docker run -it \
 
 After the import is complete, you can access the Nominatim API at `http://localhost:8080/search?q=avenue%20pasteur`.
 
+## Health Check Endpoint
+
+The service includes a health check endpoint at `/health` that always returns HTTP 200 with service status:
+
+```sh
+curl http://localhost:8080/health
+```
+
+Response:
+```json
+{"status":"online","service":"nominatim"}
+```
+
 ## Accessing Different Versions
 
 You can pull specific versions of the Nominatim Docker image by specifying the tag. For example, to use Nominatim version `5.2`:

@@ -7,7 +7,10 @@ GUNICORN_PID_FILE=/tmp/gunicorn.pid
 export PYTHONUNBUFFERED=1
 
 stopServices() {
-  service postgresql stop
+  # Only stop PostgreSQL if we're using in-container database
+  if [ -z "$NOMINATIM_DATABASE_DSN" ] && [ -z "$PGHOST" ]; then
+    service postgresql stop
+  fi
   # Check if the replication process is active
   if [ $replicationpid -ne 0 ]; then
     echo "Shutting down replication process"
@@ -29,6 +32,12 @@ else
   useradd -m -p ${NOMINATIM_PASSWORD} nominatim
 fi
 
+# Set up SSL certificate for nominatim user
+mkdir -p /home/nominatim/.postgresql
+ln -sf /etc/ssl/certs/aws-global-bundle.pem /home/nominatim/.postgresql/root.crt
+chown -R nominatim:nominatim /home/nominatim/.postgresql
+chmod 700 /home/nominatim/.postgresql
+
 IMPORT_FINISHED=/var/lib/postgresql/16/main/import-finished
 
 if [ ! -f ${IMPORT_FINISHED} ]; then
@@ -38,7 +47,13 @@ else
   chown -R nominatim:nominatim ${PROJECT_DIR}
 fi
 
-service postgresql start
+# Only start PostgreSQL if we're using in-container database
+if [ -z "$NOMINATIM_DATABASE_DSN" ] && [ -z "$PGHOST" ]; then
+  echo "Starting in-container PostgreSQL"
+  service postgresql start
+else
+  echo "Using external PostgreSQL - not starting local service"
+fi
 
 cd ${PROJECT_DIR} && sudo -E -u nominatim nominatim refresh --website --functions
 
@@ -64,8 +79,16 @@ if [ "$REPLICATION_URL" != "" ] && [ "$FREEZE" != "true" ]; then
 fi
 
 # fork a process and wait for it
-tail -Fv /var/log/postgresql/postgresql-16-main.log &
-tailpid=${!}
+# Only tail PostgreSQL logs if using in-container database
+if [ -z "$NOMINATIM_DATABASE_DSN" ] && [ -z "$PGHOST" ]; then
+  tail -Fv /var/log/postgresql/postgresql-16-main.log &
+  tailpid=${!}
+else
+  # For external database, just create a dummy background process
+  # so the wait command at the end has something to wait for
+  sleep infinity &
+  tailpid=${!}
+fi
 
 if [ "$WARMUP_ON_STARTUP" = "true" ]; then
   export NOMINATIM_QUERY_TIMEOUT=600
@@ -94,6 +117,11 @@ echo "Starting Gunicorn with $GUNICORN_WORKERS workers"
 echo "--> Nominatim is ready to accept requests"
 
 cd "$PROJECT_DIR"
+
+# Copy custom server with health endpoint
+cp /app/server.py "$PROJECT_DIR/server.py"
+chown nominatim:nominatim "$PROJECT_DIR/server.py"
+
 sudo -E -u nominatim gunicorn \
   --bind :8080 \
   --pid $GUNICORN_PID_FILE \
@@ -101,6 +129,7 @@ sudo -E -u nominatim gunicorn \
   --daemon \
   --enable-stdio-inheritance \
   --worker-class uvicorn.workers.UvicornWorker \
-  nominatim_api.server.falcon.server:run_wsgi
+  --chdir "$PROJECT_DIR" \
+  server:run_wsgi
 
 wait

@@ -48,6 +48,28 @@ RUN  \
 # Update CA Certs
 RUN update-ca-certificates
 
+# Copy AWS RDS certificate bundle for psql SSL connections
+COPY global-bundle.pem /etc/ssl/certs/aws-global-bundle.pem
+RUN chmod 644 /etc/ssl/certs/aws-global-bundle.pem
+
+# Configure SSL for postgres user to use the AWS CA bundle
+# This creates the .postgresql directory for the postgres user and sets up SSL config
+RUN mkdir -p /var/lib/postgresql/.postgresql && \
+    ln -s /etc/ssl/certs/aws-global-bundle.pem /var/lib/postgresql/.postgresql/root.crt && \
+    chown -R postgres:postgres /var/lib/postgresql/.postgresql && \
+    chmod 700 /var/lib/postgresql/.postgresql && \
+    chmod 644 /var/lib/postgresql/.postgresql/root.crt
+
+# Also set up for root user
+RUN mkdir -p /root/.postgresql && \
+    ln -s /etc/ssl/certs/aws-global-bundle.pem /root/.postgresql/root.crt && \
+    chmod 700 /root/.postgresql && \
+    chmod 644 /root/.postgresql/root.crt
+
+# Set default PostgreSQL client SSL mode to require (not require client certs)
+ENV PGSSLMODE=require
+ENV PGSSLROOTCERT=/etc/ssl/certs/aws-global-bundle.pem
+
 # Configure postgres.
 RUN true \
     && echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/16/main/pg_hba.conf \
@@ -85,6 +107,7 @@ COPY conf.d/postgres-tuning.conf /etc/postgresql/16/main/conf.d/
 COPY config.sh /app/config.sh
 COPY init.sh /app/init.sh
 COPY start.sh /app/start.sh
+COPY server.py /app/server.py
 
 # Collapse image to single layer.
 FROM scratch

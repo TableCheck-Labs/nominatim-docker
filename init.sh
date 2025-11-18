@@ -74,23 +74,31 @@ if [ "$PBF_PATH" != "" ]; then
 fi
 
 
-# if we use a bind mount then the PG directory is empty and we have to create it
-if [ ! -f /var/lib/postgresql/16/main/PG_VERSION ]; then
-  chown postgres:postgres /var/lib/postgresql/16/main
-  sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
+# Check if we're using an external database (AWS RDS, etc.)
+if [ -z "$NOMINATIM_DATABASE_DSN" ] && [ -z "$PGHOST" ]; then
+  echo "Using in-container PostgreSQL"
+  # if we use a bind mount then the PG directory is empty and we have to create it
+  if [ ! -f /var/lib/postgresql/16/main/PG_VERSION ]; then
+    chown postgres:postgres /var/lib/postgresql/16/main
+    sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
+  fi
+
+  # temporarily enable unsafe import optimization config
+  cp /etc/postgresql/16/main/conf.d/postgres-import.conf.disabled /etc/postgresql/16/main/conf.d/postgres-import.conf
+
+  sudo service postgresql start
+else
+  echo "Using external PostgreSQL database (NOMINATIM_DATABASE_DSN or PGHOST is set)"
 fi
 
-# temporarily enable unsafe import optimization config
-cp /etc/postgresql/16/main/conf.d/postgres-import.conf.disabled /etc/postgresql/16/main/conf.d/postgres-import.conf
-
-sudo service postgresql start && \
-sudo -E -u postgres psql postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='nominatim'" | grep -q 1 || sudo -E -u postgres createuser -s nominatim && \
-sudo -E -u postgres psql postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='www-data'" | grep -q 1 || sudo -E -u postgres createuser -SDR www-data && \
-
-sudo -E -u postgres psql postgres -tAc "ALTER USER nominatim WITH ENCRYPTED PASSWORD '$NOMINATIM_PASSWORD'" && \
-sudo -E -u postgres psql postgres -tAc "ALTER USER \"www-data\" WITH ENCRYPTED PASSWORD '${NOMINATIM_PASSWORD}'" && \
-
-sudo -E -u postgres psql postgres -c "DROP DATABASE IF EXISTS nominatim"
+if [ -z "$NOMINATIM_DATABASE_DSN" ] && [ -z "$PGHOST" ]; then
+  # Only create users if using local PostgreSQL
+  sudo -E -u postgres psql postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='nominatim'" | grep -q 1 || sudo -E -u postgres createuser -s nominatim && \
+  sudo -E -u postgres psql postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='www-data'" | grep -q 1 || sudo -E -u postgres createuser -SDR www-data && \
+  sudo -E -u postgres psql postgres -tAc "ALTER USER nominatim WITH ENCRYPTED PASSWORD '$NOMINATIM_PASSWORD'" && \
+  sudo -E -u postgres psql postgres -tAc "ALTER USER \"www-data\" WITH ENCRYPTED PASSWORD '${NOMINATIM_PASSWORD}'" && \
+  sudo -E -u postgres psql postgres -c "DROP DATABASE IF EXISTS nominatim"
+fi
 
 chown -R nominatim:nominatim ${PROJECT_DIR}
 
@@ -141,10 +149,12 @@ export NOMINATIM_REQUEST_TIMEOUT=60
 # and  https://github.com/osm-search/Nominatim/issues/1139
 sudo -E -u nominatim psql -d nominatim -c "ANALYZE VERBOSE"
 
-sudo service postgresql stop
-
-# Remove slightly unsafe postgres config overrides that made the import faster
-rm /etc/postgresql/16/main/conf.d/postgres-import.conf
+# Only stop PostgreSQL if we started it (in-container mode)
+if [ -z "$NOMINATIM_DATABASE_DSN" ] && [ -z "$PGHOST" ]; then
+  sudo service postgresql stop
+  # Remove slightly unsafe postgres config overrides that made the import faster
+  rm /etc/postgresql/16/main/conf.d/postgres-import.conf
+fi
 
 echo "Deleting downloaded dumps in ${PROJECT_DIR}"
 rm -f ${PROJECT_DIR}/*sql.gz
