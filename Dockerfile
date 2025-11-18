@@ -43,7 +43,10 @@ RUN  \
         sudo \
         sshpass \
         openssh-client
+        ca-certificates
 
+# Update CA Certs
+RUN update-ca-certificates
 
 # Configure postgres.
 RUN true \
