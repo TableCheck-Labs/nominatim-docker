@@ -42,7 +42,7 @@ RUN  \
         curl \
         sudo \
         sshpass \
-        openssh-client
+        openssh-client \
         ca-certificates
 
 # Update CA Certs
