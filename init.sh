@@ -11,6 +11,38 @@ if [ -z "$THREADS" ]; then
   THREADS=$(nproc)
 fi
 
+# Test PostgreSQL connection early (fail fast before downloading large files)
+echo "Testing PostgreSQL connection..."
+if [ ! -z "$PGHOST" ]; then
+  # External database - test connection
+  echo "Attempting to connect to external PostgreSQL at $PGHOST..."
+  if ! psql -h "$PGHOST" -p "${PGPORT:-5432}" -U "${PGUSER:-nominatim}" -d postgres -c "SELECT version();" > /dev/null 2>&1; then
+    echo "ERROR: Cannot connect to PostgreSQL at $PGHOST:${PGPORT:-5432}"
+    echo "Please check:"
+    echo "  - Database host and port are correct"
+    echo "  - Network connectivity (security groups, firewall rules)"
+    echo "  - PGUSER and PGPASSWORD are correct"
+    echo "  - SSL configuration is correct"
+    exit 1
+  fi
+  echo "✓ Successfully connected to external PostgreSQL"
+  
+  # Check if PostGIS is available
+  if ! psql -h "$PGHOST" -p "${PGPORT:-5432}" -U "${PGUSER:-nominatim}" -d "${PGDATABASE:-nominatim}" -c "SELECT PostGIS_version();" > /dev/null 2>&1; then
+    echo "WARNING: PostGIS extension may not be installed or database may not exist"
+    echo "Make sure to create the database and install PostGIS extension:"
+    echo "  CREATE DATABASE ${PGDATABASE:-nominatim};"
+    echo "  \\c ${PGDATABASE:-nominatim}"
+    echo "  CREATE EXTENSION postgis;"
+  else
+    echo "✓ PostGIS extension is available"
+  fi
+else
+  # In-container database - will be started later
+  echo "Using in-container PostgreSQL (will be started during import)"
+fi
+echo ""
+
 # we re-host the files on a Hetzner storage box because inconsiderate users eat up all of
 # nominatim.org's bandwidth
 # https://github.com/mediagis/nominatim-docker/issues/416

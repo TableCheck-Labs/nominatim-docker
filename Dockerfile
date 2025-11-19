@@ -67,8 +67,11 @@ RUN mkdir -p /root/.postgresql && \
     chmod 644 /root/.postgresql/root.crt
 
 # Set default PostgreSQL client SSL mode to require (not require client certs)
+# Explicitly disable client certificate authentication
 ENV PGSSLMODE=require
 ENV PGSSLROOTCERT=/etc/ssl/certs/aws-global-bundle.pem
+ENV PGSSLCERT=/dev/null
+ENV PGSSLKEY=/dev/null
 
 # Configure postgres.
 RUN true \

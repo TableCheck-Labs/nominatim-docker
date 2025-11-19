@@ -20,6 +20,43 @@ docker run -it \
 
 After the import is complete, you can access the Nominatim API at `http://localhost:8080/search?q=avenue%20pasteur`.
 
+## Using External PostgreSQL Database (e.g., AWS RDS)
+
+To use an external PostgreSQL database instead of the in-container database, provide the following environment variables:
+
+```sh
+docker run -it \
+  -e PGHOST=your-rds-endpoint.rds.amazonaws.com \
+  -e PGPORT=5432 \
+  -e PGDATABASE=nominatim \
+  -e PGUSER=nominatim \
+  -e PGPASSWORD=your-password \
+  -e PBF_URL=https://download.geofabrik.de/europe/monaco-latest.osm.pbf \
+  -p 8080:8080 \
+  --name nominatim \
+  mediagis/nominatim:5.2
+```
+
+When `PGHOST` is set, the container will:
+- **Test the database connection immediately** before downloading any data (fail fast)
+- **Not start** the in-container PostgreSQL service
+- Use the external database for all operations
+- Automatically use SSL encryption for AWS RDS connections (password auth, not client certificates)
+- Verify PostGIS extension is installed and available
+- Assume the database and users already exist (you must create them beforehand)
+
+**SSL Configuration:**
+The container uses password authentication with SSL encryption (`PGSSLMODE=require`), not client certificate authentication. This is the standard configuration for AWS RDS. The AWS CA bundle is automatically used to verify the server's identity.
+
+**Connection Testing:**
+The container tests the PostgreSQL connection before downloading any OSM/PBF files. If the connection fails, it will exit immediately with an error message explaining what to check. This prevents wasting time and bandwidth on downloads when the database isn't accessible.
+
+**Prerequisites for external database:**
+- PostgreSQL 16 with PostGIS extension installed
+- Database named according to `PGDATABASE` (default: `nominatim`)
+- User with superuser privileges during import
+- For AWS RDS: Database parameter group must have `postgis` extension enabled
+
 ## Health Check Endpoint
 
 The service includes a health check endpoint at `/health` that always returns HTTP 200 with service status:
